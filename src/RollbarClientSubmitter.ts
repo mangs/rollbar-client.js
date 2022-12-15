@@ -33,26 +33,15 @@ function buildEnumerableObject(targetObject: Error) {
   return enumerableObject;
 }
 
-// function buildObjectDeepSorted(targetValue: any) {
-//   if (targetValue === null || typeof targetValue !== 'object' || Array.isArray(targetValue)) {
-//     return targetValue;
-//   }
-
-//   const newObject: IGenericObjectIndexSignature = {};
-//   for (const key of Object.keys(targetValue).sort((a, b) => a.localeCompare(b, 'en'))) {
-//     newObject[key] = buildObjectDeepSorted(targetValue[key]);
-//   }
-//   return newObject;
-// }
-function buildObjectDeepSorted<T>(targetValue: T) {
-  if (typeof targetValue === 'object' && targetValue !== null && !Array.isArray(targetValue)) {
-    const newObject: IGenericObjectIndexSignature = {};
-    for (const key of Object.keys(targetValue).sort((a, b) => a.localeCompare(b, 'en'))) {
-      newObject[key] = buildObjectDeepSorted(targetValue[key]);
-    }
-    return newObject;
+function buildObjectDeepSorted<T extends object>(targetValue: T): T {
+  const newObject = {} as T;
+  for (const key of Object.keys(targetValue).sort((a, b) => a.localeCompare(b, 'en'))) {
+    const castedKey = key as keyof T;
+    const value = targetValue[castedKey];
+    const isValueObject = typeof value === 'object' && value !== null && !Array.isArray(value);
+    newObject[castedKey] = isValueObject ? (buildObjectDeepSorted(value) as T[keyof T]) : value;
   }
-  return targetValue;
+  return newObject;
 }
 
 function getStackFrames(error: Error) {
@@ -84,19 +73,22 @@ function logToConsole(...parameters: TSubmitterParameters) {
 }
 
 function serializeConfigurationObject(configObject: IConfigurationInternal) {
-  const serializedConfigObject: IGenericObjectIndexSignature = {};
+  const serializedConfigObject = {} as Required<IPayload['data']['custom']>['configuration'];
   for (const [key, value] of Object.entries(configObject)) {
     if (key === 'accessToken') {
       // eslint-disable-next-line no-continue -- skip serializing accessToken
       continue;
     }
-
-    if (value instanceof Function || value instanceof RegExp) {
-      serializedConfigObject[key] = (value as typeof Function | RegExp).toString();
+    const castedKey = key as keyof typeof serializedConfigObject;
+    const castedValue = value as Omit<IConfigurationInternal, 'payload'>[typeof castedKey];
+    if (castedValue instanceof Function || castedValue instanceof RegExp) {
+      (serializedConfigObject[castedKey] as string) = castedValue.toString();
       // eslint-disable-next-line no-continue -- explicitly cast functions and regexes to strings; the default case is to serialize the raw value
       continue;
     }
-    serializedConfigObject[key] = value as TConfigurationObjectValue;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- we need serialzdConfigObject as a generic value, otherwise as a union type it'll be considered never
+    (serializedConfigObject[castedKey] as typeof serializedConfigObject[typeof castedKey]) =
+      castedValue;
   }
   return serializedConfigObject;
 }
@@ -248,8 +240,8 @@ class RollbarClientSubmitter {
       payloadPreMerge.data.fingerprint = title;
     }
 
-    const payloadMerged = extend(true, payloadPreMerge, customPayloadFields);
-    return buildObjectDeepSorted(payloadMerged) as IPayload;
+    const payloadMerged = extend(true, payloadPreMerge, customPayloadFields) as IPayload;
+    return buildObjectDeepSorted(payloadMerged);
   }
 
   report(...parameters: TSubmitterParameters) {
